@@ -1,0 +1,11 @@
+bot/node_modules/
+bot/.env
+
+synapse/media_store/
+synapse/*.signing.key
+synapse/homeserver.yaml
+synapse/*.log.config
+
+postgres/
+
+*/data

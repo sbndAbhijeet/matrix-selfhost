@@ -1,0 +1,8 @@
+node_modules/
+
+.env
+
+npm-debug.log*
+pnpm-debug.log*
+
+pnpm-lock.yaml

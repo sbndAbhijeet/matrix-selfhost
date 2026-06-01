@@ -1,0 +1,25 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: matrix-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: synapsepassword
+      POSTGRES_DB: synapse
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    volumes:
+      - ./postgres:/var/lib/postgresql/data
+
+  synapse:
+    image: matrixdotorg/synapse:latest
+    container_name: matrix-synapse
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "8008:8008"
+    volumes:
+      - ./synapse:/data
+    environment:
+      SYNAPSE_CONFIG_PATH: /data/homeserver.yaml
