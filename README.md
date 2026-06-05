@@ -17,6 +17,11 @@ Self-hosted Matrix Synapse with a simple Matrix bot that summarizes recent chat 
 - `bot/` — Matrix bot source and dependencies
   - `listener.js` — bot process that reads room messages and responds
   - `package.json` / `pnpm-lock.yaml` — bot package metadata and lockfile
+- `mcp-server/` — MCP server that lets Claude Desktop inspect Matrix rooms and messages
+  - `index.js` — MCP entrypoint; loads `.env`, installs WebCrypto, and protects MCP stdout
+  - `server.js` — registers the MCP tools
+  - `matrixClient.js` — creates the Matrix client and silences SDK logs
+  - `tools/` — room listing, message reading, and message search tools
 - `postgres/` — local Postgres data volume
 
 ## Synapse configuration
@@ -146,7 +151,7 @@ If you need more users later, repeat the same command pattern with a new usernam
 
 The bot will not work until its environment variables are set correctly.
 
-Create `bot/.env` with:
+Copy `bot/.env.example` to `bot/.env`, then fill in real values:
 
 ```text
 BOT_USER=@ai-bot:matrix.wetec-server.com
@@ -189,6 +194,72 @@ When the bot starts, it logs in as `ai-bot` and listens for room messages.
 5. Invite the bot to the room.
 6. Send `/summarize` in that room.
 7. The bot replies with a summary.
+
+## Claude Desktop MCP server
+
+The `mcp-server/` folder exposes Matrix tools to Claude Desktop:
+
+- `list_rooms` lists joined rooms and marks encrypted rooms.
+- `get_messages` reads recent messages from an unencrypted room.
+- `search_messages` searches across unencrypted rooms.
+
+Encrypted rooms are intentionally not readable by this MCP server because end-to-end encrypted message contents are decrypted in a Matrix client such as Element, not by the homeserver.
+
+### MCP server environment
+
+Copy `mcp-server/.env.example` to `mcp-server/.env`, then fill in real values:
+
+```text
+MATRIX_BASE_URL=http://localhost:8008
+MATRIX_USER_ID=@your-username:matrix.wetec-server.com
+MATRIX_PASSWORD=your-password
+```
+
+The MCP entrypoint also loads this file by absolute script location, so it still works when Claude Desktop starts the process from a different working directory.
+
+### Claude Desktop configuration from Windows into WSL
+
+When Claude Desktop runs on Windows and the project lives in WSL, configure the MCP server like this:
+
+```json
+{
+  "mcpServers": {
+    "matrix-wetec": {
+      "command": "wsl.exe",
+      "args": [
+        "--cd",
+        "/home/bhanu/Projects/matrix-selfhost/mcp-server",
+        "node",
+        "index.js"
+      ]
+    }
+  }
+}
+```
+
+Claude Desktop starts `index.js` for you. You only need to run it manually when debugging.
+
+### Restarting Claude Desktop after MCP changes
+
+After changing MCP server code or config:
+
+1. Close Claude Desktop.
+2. Open Task Manager.
+3. End any remaining Claude Desktop process.
+4. Open Claude Desktop again.
+
+This forces Claude to start a fresh MCP server process.
+
+### MCP stdout rule
+
+MCP servers communicate with Claude over stdout using JSON-RPC. Do not write normal logs to stdout from MCP server code or dependencies. Use stderr for logs.
+
+This project protects that rule in `mcp-server/index.js` and `mcp-server/matrixClient.js` by:
+
+- loading `dotenv` quietly
+- redirecting `console.log`, `console.info`, and `console.debug` to stderr
+- passing a silent logger to `matrix-js-sdk`
+- silencing the Matrix SDK root logger and child loggers
 
 ## Registering more users
 
