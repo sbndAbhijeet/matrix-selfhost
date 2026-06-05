@@ -1,81 +1,77 @@
-# Matrix-selfhost
+# Matrix Selfhost
 
-Self-hosted Matrix Synapse with a simple Matrix bot that summarizes recent chat using OpenAI.
+A self-hosted Matrix (Synapse) server with a Claude-powered MCP server that lets Claude Desktop read, search, and summarize your Matrix rooms and messages.
 
-## Overview
+---
 
-- `docker-compose.yml` runs the Matrix homeserver and Postgres.
-- `synapse/` contains the homeserver configuration and media store.
-- `bot/` contains the Matrix bot that listens for `/summarize` and replies with a summary.
+## What this project does
+
+- Runs a private Matrix homeserver (Synapse) and PostgreSQL database via Docker.
+- Exposes your Matrix rooms and messages to Claude Desktop through an MCP server.
+- Includes a legacy bot (`bot/`) that listens for `/summarize` commands
+
+---
+
+## Architecture
+
+```
+Claude Desktop (Windows)
+        │
+        │  stdio / JSON-RPC
+        ▼
+MCP Server — mcp-server/index.js   (Node.js, runs inside WSL)
+        │
+        │  matrix-js-sdk (HTTP)
+        ▼
+Synapse homeserver — localhost:8008  (Docker container)
+        │
+        ▼
+PostgreSQL — localhost:5432          (Docker container)
+```
+
+Claude Desktop starts the MCP server automatically when it launches. You do not run the MCP server manually during normal use.
+
+---
 
 ## Project structure
 
-- `docker-compose.yml` — starts the Postgres and Synapse containers
-- `synapse/` — Synapse configuration and persistent data
-  - `homeserver.yaml` — active Synapse server config
-  - `media_store/` — Synapse media storage volume
-- `bot/` — Matrix bot source and dependencies
-  - `listener.js` — bot process that reads room messages and responds
-  - `package.json` / `pnpm-lock.yaml` — bot package metadata and lockfile
-- `mcp-server/` — MCP server that lets Claude Desktop inspect Matrix rooms and messages
-  - `index.js` — MCP entrypoint; loads `.env`, installs WebCrypto, and protects MCP stdout
-  - `server.js` — registers the MCP tools
-  - `matrixClient.js` — creates the Matrix client and silences SDK logs
-  - `tools/` — room listing, message reading, and message search tools
-- `postgres/` — local Postgres data volume
-
-## Synapse configuration
-
-Before starting the Matrix homeserver for the first time, generate the Synapse configuration and signing keys:
-
-```bash
-mkdir -p synapse
-
-docker run -it --rm \
--v ./synapse:/data \
--e SYNAPSE_SERVER_NAME=matrix.wetec-server.com \
--e SYNAPSE_REPORT_STATS=no \
-matrixdotorg/synapse:latest generate
+```
+matrix-selfhost/
+├── docker-compose.yml          — starts Synapse and PostgreSQL
+├── synapse/                    — Synapse configuration and data
+│   ├── homeserver.yaml         — active homeserver config
+│   └── media_store/            — uploaded media (volume mount)
+├── postgres/                   — PostgreSQL data volume
+├── mcp-server/                 — MCP server for Claude Desktop
+│   ├── index.js                — entry point: sets up WebCrypto, protects stdout, loads .env
+│   ├── server.js               — registers MCP tools
+│   ├── matrixClient.js         — Matrix client with silenced SDK logs
+│   ├── tools/
+│   │   ├── listRooms.js        — list_rooms tool
+│   │   ├── getMessages.js      — get_messages tool
+│   │   └── searchMessages.js   — search_messages tool
+│   ├── .env                    — your credentials
+│   └── package.json
+└── bot/                        — bot fuctions
+    ├── listener.js
+    ├── summarize.js
+    └── package.json
 ```
 
-This creates:
+---
 
-* `homeserver.yaml`
-* signing keys
-* media store directories
-* other required Synapse configuration files
+## Prerequisites
 
-inside the `synapse/` directory.
+- **Windows with WSL (Ubuntu)** — If the project runs inside WSL
+- **Docker Desktop** — with WSL integration enabled
+- **Node.js 18 or higher** inside WSL
+- **Claude Desktop** — installed on Windows
 
-### Configure PostgreSQL
+---
 
-Open `synapse/homeserver.yaml`.
+## 1. Start the homeserver
 
-Replace the default SQLite configuration:
-
-```yaml
-database:
-  name: sqlite3
-  args:
-    database: /data/homeserver.db
-```
-
-with:
-
-```yaml
-database:
-  name: psycopg2
-  args:
-    user: synapse
-    password: synapsepassword
-    database: synapse
-    host: postgres
-    cp_min: 5
-    cp_max: 10
-```
-
-
-### Start the services
+From the project root inside WSL:
 
 ```bash
 docker-compose up -d
@@ -87,95 +83,275 @@ Verify Synapse is running:
 curl http://localhost:8008/_matrix/client/versions
 ```
 
-A valid JSON response indicates that the homeserver is running correctly.
+You should see a JSON response. If you get a connection error, wait a few seconds and try again — Synapse takes a moment to start.
 
+---
 
+## 2. First-time Synapse setup
 
-## Prerequisites
+Run this once to generate `homeserver.yaml` and signing keys before starting the containers:
 
-- Docker and Docker Compose
-- Node.js 18+ and `pnpm` or `npm`
-- An OpenAI API key for the bot
+```bash
+mkdir -p synapse
 
-## Setup
+docker run -it --rm \
+  -v ./synapse:/data \
+  -e SYNAPSE_SERVER_NAME=matrix.wetec-server.com \
+  -e SYNAPSE_REPORT_STATS=no \
+  matrixdotorg/synapse:latest generate
+```
 
-### 1) Start Synapse and Postgres
+Then open `synapse/homeserver.yaml` and replace the default SQLite database block:
+
+```yaml
+# Remove this:
+database:
+  name: sqlite3
+  args:
+    database: /data/homeserver.db
+```
+
+with:
+
+```yaml
+# Add this:
+database:
+  name: psycopg2
+  args:
+    user: synapse
+    password: synapsepassword
+    database: synapse
+    host: postgres
+    cp_min: 5
+    cp_max: 10
+```
+
+Now start the containers:
 
 ```bash
 docker-compose up -d
 ```
 
-### 2) Check that Synapse is reachable
+---
+
+## 3. Create Matrix users
+
+Run these commands once after Synapse is running. Repeat the pattern for any additional users you need.
+
+**Admin user:**
+```bash
+docker exec -it matrix-synapse register_new_matrix_user \
+  -c /data/homeserver.yaml http://localhost:8008 \
+  -u admin -p admin123 -a
+```
+
+**Regular user:**
+```bash
+docker exec -it matrix-synapse register_new_matrix_user \
+  -c /data/homeserver.yaml http://localhost:8008 \
+  -u user1 -p user123
+```
+
+**Bot user (for the bot):**
+```bash
+docker exec -it matrix-synapse register_new_matrix_user \
+  -c /data/homeserver.yaml http://localhost:8008 \
+  -u ai-bot -p bot123
+```
+
+To add more users later, repeat the same command with a new `-u` and `-p`. Add `-a` for admin.
+
+---
+
+## 4. Connect Element to your homeserver
+
+1. Open Element (browser or desktop app).
+2. Choose **Sign in**.
+3. Select **Edit** next to the homeserver URL.
+4. Enter `http://localhost:8008`.
+5. Log in with one of the users you created above.
+
+---
+
+## 5. Set up the MCP server
+
+### Install dependencies
 
 ```bash
-curl http://localhost:8008/_matrix/client/versions
+cd mcp-server
+npm install
 ```
 
-### 3) Create the Matrix users
-
-Create the users below with Synapse’s registration helper. These are the accounts you can use for testing:
-
-- Admin: `admin` / `admin123`
-- Regular user: `user1` / `user123`
-- Bot user: `ai-bot` / `bot123`
-
-Create the admin account first:
+### Create the environment file
 
 ```bash
-docker exec -it matrix-synapse register_new_matrix_user -c /data/homeserver.yaml http://localhost:8008 -u admin -p admin123 -a
+cp .env.example .env
 ```
 
-Create the normal user:
+Edit `mcp-server/.env` with your values:
+
+```env
+MATRIX_BASE_URL=http://localhost:8008
+MATRIX_USER_ID=@your-username:matrix.wetec-server.com
+MATRIX_PASSWORD=your-password
+```
+
+Use the credentials of the Matrix account you want Claude to act as. Claude will see exactly the rooms that account has joined.
+
+> **Note:** The MCP server loads `.env` by its own file path, so it works correctly regardless of the directory Claude Desktop starts the process from.
+
+---
+
+## 6. Configure Claude Desktop (Windows)
+
+Claude Desktop needs to know how to start the MCP server. Because if the project lives in WSL and Claude Desktop runs on Windows, use `wsl.exe` as the command.
+
+Open the Claude Desktop config file on Windows:
+
+1. Go to Claude Desktop.
+2. Go to Settings.
+3. Select Developer and click on config and select `claude_desktop_config.json`
+
+
+Add the `mcpServers` block to the existing JSON. Do not replace the rest of the file — just add it alongside your other keys:
+
+```json
+{
+  "mcpServers": {
+    "matrix-wetec": {
+      "command": "wsl.exe", //only if working on wsl else not
+      "args": [
+        "node",
+        "../matrix-selfhost/mcp-server/index.js", //path to index.js (starting point)
+      ]
+    }
+  }
+}
+```
+
+
+> **Why `wsl.exe`?** Claude Desktop runs on Windows, but the MCP server is a Node.js process inside WSL. Using `wsl.exe` as the command tells Windows to run `node index.js` inside WSL. 
+
+### Verify Node.js is accessible from Windows
+
+Before restarting Claude Desktop, confirm that WSL Node can be reached from Windows CMD:
+
+```cmd
+wsl node --version
+```
+
+If this prints a version number (e.g. `v20.x.x`), the config will work. If you get `node not found`, find the full path:
 
 ```bash
-docker exec -it matrix-synapse register_new_matrix_user -c /data/homeserver.yaml http://localhost:8008 -u user1 -p user123
+# inside WSL
+which node
 ```
+Then use that full path in the args array
 
-Create the bot account:
+---
+
+## 7. Restart Claude Desktop
+
+After saving the config:
+
+1. Close Claude Desktop.
+2. Open Task Manager on Windows.
+3. End any remaining Claude Desktop or node processes if present.
+4. Open Claude Desktop again.
+
+When Claude loads, you should see a small hammer icon (🔨) in the chat input area. This means the MCP tools are connected. Sometimes your options will show your mcp server is ON
+
+---
+
+## 8. Test the MCP tools
+
+### Send test messages via curl (no Element login needed)
+
+First get your access token:
 
 ```bash
-docker exec -it matrix-synapse register_new_matrix_user -c /data/homeserver.yaml http://localhost:8008 -u ai-bot -p bot123
+curl -X POST http://localhost:8008/_matrix/client/v3/login \
+  -H "Content-Type: application/json" \
+  -d '{"type":"m.login.password","user":"user1","password":"user123"}'
 ```
 
-If you need more users later, repeat the same command pattern with a new username and password. Add `-a` when you want an admin account.
-
-### 4) Connect with Element
-
-- Open Element in your browser or desktop app.
-- Choose **Sign in**.
-- Select **Custom server** or **Homeserver**.
-- Set the homeserver URL to `http://localhost:8008`.
-- Log in with one of the users you created above, for example `admin` or `user1`.
-
-### 5) Configure the bot — this is the crucial part
-
-The bot will not work until its environment variables are set correctly.
-
-Copy `bot/.env.example` to `bot/.env`, then fill in real values:
-
-```text
-BOT_USER=@ai-bot:matrix.wetec-server.com
-BOT_PASSWORD=bot123
-OPENAI_API_KEY=sk-xxxx
-```
-
-Important:
-
-- `BOT_USER` must match the Matrix ID for your bot account.
-- `BOT_PASSWORD` must match the password you used when creating the bot user.
-- `OPENAI_API_KEY` must be a valid OpenAI key.
-
-### 6) Install dependencies and run the bot
-
-Using `pnpm`:
+Copy the `access_token` from the response. Then list your joined rooms to find room IDs:
 
 ```bash
-cd bot
-pnpm install
-node listener.js
+curl http://localhost:8008/_matrix/client/v3/joined_rooms \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
 ```
 
-Or using `npm`:
+Send a test message to a room:
+
+```bash
+curl -X PUT \
+  "http://localhost:8008/_matrix/client/v3/rooms/!ROOMID:matrix.wetec-server.com/send/m.room.message/txn1" \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"msgtype":"m.text","body":"Test message for MCP"}'
+```
+
+Send several messages at once with a shell loop:
+
+```bash
+TOKEN="YOUR_ACCESS_TOKEN"
+ROOM="!YOUROOMID:matrix.wetec-server.com"
+BASE="http://localhost:8008/_matrix/client/v3/rooms"
+
+messages=(
+  "Morning team, standup in 10 mins"
+  "I pushed the fix for the postgres migration issue"
+  "Can someone review the MCP server PR?"
+  "Synapse logs are showing high memory usage"
+  "Meeting notes from yesterday are in the wiki"
+)
+
+for i in "${!messages[@]}"; do
+  curl -s -X PUT \
+    "$BASE/$ROOM/send/m.room.message/txn$RANDOM$i" \
+    -H "Authorization: Bearer $TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "{\"msgtype\":\"m.text\",\"body\":\"${messages[$i]}\"}" \
+    | jq .event_id
+  sleep 0.5
+done
+```
+
+### Ask Claude to use the tools
+
+Once messages are in your rooms, ask Claude naturally:
+
+- "List all my Matrix rooms"
+- "Get messages from the dev room"
+- "Search for any messages mentioning postgres"
+- "Summarize what was discussed in the general room"
+
+---
+
+## Available MCP tools
+
+| Tool | Description |
+|------|-------------|
+| `list_rooms` | Lists all rooms your account has joined. Marks encrypted rooms with 🔒 and readable rooms with ✅. |
+| `get_messages` | Returns recent messages from a room. Refuses with a clear explanation if the room is encrypted. |
+| `search_messages` | Searches for a keyword across all readable rooms. Reports how many encrypted rooms were skipped. |
+
+### Encrypted rooms
+
+End-to-end encrypted messages are decrypted only inside a Matrix client (like Element), not on the Synapse server. The MCP server cannot read them. Encrypted rooms are detected and skipped automatically — Claude will tell you why it cannot help with those rooms rather than silently failing.
+
+Encrypted room support is a planned future milestone.
+
+---
+
+
+
+## Bot Setup
+
+The `bot/` folder contains an earlier experiment — a Matrix bot that listens for `/summarize` and replies with a chat summary. It is not the main integration path for this project but is kept as a useful reference for matrix-js-sdk usage patterns (authentication, sync, timeline events, command handling). Later may add additional commands to make more powerful.
+
+To run it:
 
 ```bash
 cd bot
@@ -183,94 +359,12 @@ npm install
 node listener.js
 ```
 
-When the bot starts, it logs in as `ai-bot` and listens for room messages.
+The bot requires `bot/.env` with:
 
-## How to test
-
-1. Start the stack with `docker-compose up -d`.
-2. Create or confirm the users `admin`, `user1`, and `ai-bot`.
-3. Log in to Element with `admin` or `user1` using `http://localhost:8008` as the homeserver.
-4. Start the bot from the `bot/` folder use `node listener.js`.
-5. Invite the bot to the room.
-6. Send `/summarize` in that room.
-7. The bot replies with a summary.
-
-## Claude Desktop MCP server
-
-The `mcp-server/` folder exposes Matrix tools to Claude Desktop:
-
-- `list_rooms` lists joined rooms and marks encrypted rooms.
-- `get_messages` reads recent messages from an unencrypted room.
-- `search_messages` searches across unencrypted rooms.
-
-Encrypted rooms are intentionally not readable by this MCP server because end-to-end encrypted message contents are decrypted in a Matrix client such as Element, not by the homeserver.
-
-### MCP server environment
-
-Copy `mcp-server/.env.example` to `mcp-server/.env`, then fill in real values:
-
-```text
-MATRIX_BASE_URL=http://localhost:8008
-MATRIX_USER_ID=@your-username:matrix.wetec-server.com
-MATRIX_PASSWORD=your-password
+```env
+BOT_USER=@ai-bot:matrix.wetec-server.com
+BOT_PASSWORD=bot123
+OPENAI_API_KEY=sk-xxxx
 ```
 
-The MCP entrypoint also loads this file by absolute script location, so it still works when Claude Desktop starts the process from a different working directory.
-
-### Claude Desktop configuration from Windows into WSL
-
-When Claude Desktop runs on Windows and the project lives in WSL, configure the MCP server like this:
-
-```json
-{
-  "mcpServers": {
-    "matrix-wetec": {
-      "command": "wsl.exe",
-      "args": [
-        "--cd",
-        "/home/bhanu/Projects/matrix-selfhost/mcp-server",
-        "node",
-        "index.js"
-      ]
-    }
-  }
-}
-```
-
-Claude Desktop starts `index.js` for you. You only need to run it manually when debugging.
-
-### Restarting Claude Desktop after MCP changes
-
-After changing MCP server code or config:
-
-1. Close Claude Desktop.
-2. Open Task Manager.
-3. End any remaining Claude Desktop process.
-4. Open Claude Desktop again.
-
-This forces Claude to start a fresh MCP server process.
-
-### MCP stdout rule
-
-MCP servers communicate with Claude over stdout using JSON-RPC. Do not write normal logs to stdout from MCP server code or dependencies. Use stderr for logs.
-
-This project protects that rule in `mcp-server/index.js` and `mcp-server/matrixClient.js` by:
-
-- loading `dotenv` quietly
-- redirecting `console.log`, `console.info`, and `console.debug` to stderr
-- passing a silent logger to `matrix-js-sdk`
-- silencing the Matrix SDK root logger and child loggers
-
-## Registering more users
-
-To add another Matrix user, use the same registration command with a new username and password:
-
-```bash
-docker exec -it matrix-synapse register_new_matrix_user -c /data/homeserver.yaml http://localhost:8008 -u alice -p alice123
-```
-
-For an admin user, add `-a`:
-
-```bash
-docker exec -it matrix-synapse register_new_matrix_user -c /data/homeserver.yaml http://localhost:8008 -u alice-admin -p alice123 -a
-```
+The bot must be invited to a room before it can respond to commands.
