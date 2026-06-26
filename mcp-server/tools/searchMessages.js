@@ -1,4 +1,5 @@
 import { getClient, isRoomEncrypted } from "../matrixClient.js";
+import { getCachedMessage } from "../cryptoCache.js";
 
 export async function searchMessages({ query }) {
   const client = await getClient();
@@ -16,19 +17,34 @@ export async function searchMessages({ query }) {
     for (const event of events) {
       if (event.getType() !== "m.room.message") continue;
 
+      let body = "";
+      let isFromCache = false;
+
       if (event.isDecryptionFailure()) {
-        decryptFailures++;
-        continue;
+        try {
+          const cached = await getCachedMessage(event.getId());
+          if (cached) {
+            body = cached.body || "";
+            isFromCache = true;
+          } else {
+            decryptFailures++;
+            continue;
+          }
+        } catch (err) {
+          decryptFailures++;
+          continue;
+        }
+      } else {
+        body = event.getContent().body || "";
       }
 
-      const body = event.getContent().body || "";
       if (!body.toLowerCase().includes(query.toLowerCase())) continue;
 
       results.push({
         room: room.name || room.roomId,
         roomId: room.roomId,
         sender: event.getSender(),
-        body,
+        body: isFromCache ? `${body} (🔑 decrypted from cache)` : body,
         time: new Date(event.getTs()).toLocaleString(),
         encrypted,
       });

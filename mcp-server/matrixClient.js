@@ -1,5 +1,6 @@
 import sdk from "matrix-js-sdk";
 import { logger as matrixLogger } from "matrix-js-sdk/lib/logger.js";
+import { saveMessageToCache } from "./cryptoCache.js";
 
 let client = null;
 let syncReady = false;
@@ -52,6 +53,17 @@ export async function getClient() {
   // Step 3 — init Rust crypto using in-memory store (as Node.js does not support native IndexedDB)
   await client.initRustCrypto({
     useIndexedDB: false,
+  });
+
+  // Listen for successfully decrypted events and cache them
+  client.on("Event.decrypted", async (event) => {
+    try {
+      if (event.getType() !== "m.room.message") return;
+      if (event.isDecryptionFailure()) return;
+      await saveMessageToCache(event);
+    } catch (err) {
+      // Fail silently to avoid breaking the client's internal timeline processing loop
+    }
   });
 
   if (typeof client.setGlobalErrorOnUnknownDevices === "function") {
