@@ -5,42 +5,66 @@ export async function getMessages({ roomId, limit = 30 }) {
   const room = client.getRoom(roomId);
 
   if (!room) {
-    return { content: [{ type: "text", text: `Room "${roomId}" not found. Use list_rooms to see available rooms.` }] };
-  }
-
-  // Gracefully block encrypted rooms
-  if (isRoomEncrypted(room)) {
     return {
-      content: [{
-        type: "text",
-        text: `🔒 Room "${room.name}" is end-to-end encrypted. I cannot read the messages — they are decrypted only on your Element client, not on the server. This is a known limitation. Encrypted room support is a planned next milestone.`,
-      }],
+      content: [
+        {
+          type: "text",
+          text: `Room "${roomId}" not found. Use list_rooms to see available rooms.`,
+        },
+      ],
     };
   }
 
-  const messages = room.timeline
-    .filter((e) => e.getType() === "m.room.message")
-    .slice(-limit)
-    .map((e) => {
-      const content = e.getContent();
-      const time = new Date(e.getTs()).toLocaleString();
-      const sender = e.getSender();
-      // Handle different message types
-      if (content.msgtype === "m.image") {
-        return `[${time}] ${sender}: [image: ${content.body}]`;
-      }
-      if (content.msgtype === "m.file") {
-        return `[${time}] ${sender}: [file: ${content.body}]`;
-      }
-      return `[${time}] ${sender}: ${content.body}`;
-    });
+  const encrypted = isRoomEncrypted(room);
 
-  if (messages.length === 0) {
-    return { content: [{ type: "text", text: `No messages found in "${room.name}". The timeline may not be fully synced yet.` }] };
+  const events = room
+    .getLiveTimeline()
+    .getEvents()
+    .filter((e) => e.getType() === "m.room.message")
+    .slice(-limit);
+
+  if (events.length === 0) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `No messages found in "${room.name}". The timeline may not be fully synced yet.`,
+        },
+      ],
+    };
   }
 
-  const header = `📋 Last ${messages.length} messages from "${room.name}" (${roomId}):\n\n`;
+  let decryptFailures = 0;
+
+  const messages = events.map((e) => {
+    const time = new Date(e.getTs()).toLocaleString();
+    const sender = e.getSender();
+
+    if (e.isDecryptionFailure()) {
+      decryptFailures++;
+      return `[${time}] ${sender}: [unable to decrypt — key not yet received]`;
+    }
+
+    const content = e.getContent();
+
+    if (content.msgtype === "m.image") {
+      return `[${time}] ${sender}: [image: ${content.body}]`;
+    }
+    if (content.msgtype === "m.file") {
+      return `[${time}] ${sender}: [file: ${content.body}]`;
+    }
+    return `[${time}] ${sender}: ${content.body}`;
+  });
+
+  const encNote = encrypted ? " 🔒 (end-to-end encrypted)" : "";
+  const header = `📋 Last ${messages.length} messages from "${room.name}"${encNote}:\n\n`;
+
+  const footer =
+    decryptFailures > 0
+      ? `\n\n⚠️ ${decryptFailures} message(s) could not be decrypted. This usually means the room keys for those messages haven't been shared with this device yet. Messages sent after this device joined will decrypt normally.`
+      : "";
+
   return {
-    content: [{ type: "text", text: header + messages.join("\n") }],
+    content: [{ type: "text", text: header + messages.join("\n") + footer }],
   };
 }

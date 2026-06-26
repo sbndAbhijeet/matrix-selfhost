@@ -333,15 +333,40 @@ Once messages are in your rooms, ask Claude naturally:
 
 | Tool | Description |
 |------|-------------|
-| `list_rooms` | Lists all rooms your account has joined. Marks encrypted rooms with 🔒 and readable rooms with ✅. |
-| `get_messages` | Returns recent messages from a room. Refuses with a clear explanation if the room is encrypted. |
-| `search_messages` | Searches for a keyword across all readable rooms. Reports how many encrypted rooms were skipped. |
+| `list_rooms` | Lists all rooms your account has joined. Marks encrypted rooms with 🔒 and unencrypted rooms with ✅. |
+| `get_messages` | Returns recent messages from a room, attempting to decrypt messages in encrypted rooms. |
+| `search_messages` | Searches for a keyword across all rooms (both encrypted and unencrypted), skipping messages that cannot be decrypted. |
 
-### Encrypted rooms
+---
 
-End-to-end encrypted messages are decrypted only inside a Matrix client (like Element), not on the Synapse server. The MCP server cannot read them. Encrypted rooms are detected and skipped automatically — Claude will tell you why it cannot help with those rooms rather than silently failing.
+## End-to-End Encryption (E2EE) Support
 
-Encrypted room support is a planned future milestone.
+This MCP server supports reading and searching messages inside end-to-end encrypted (E2EE) rooms. Here is how it works and what limitations to expect:
+
+### How it Works (The Cryptographic Approach)
+
+1. **Rust Cryptography SDK**: The MCP server uses the Matrix Rust SDK cryptography library (integrated into `matrix-js-sdk`) to handle decryption.
+2. **Device Registration**: When the MCP server logs into your homeserver, it registers itself as a new device associated with your user account.
+3. **In-Memory Key Storage**: Since Node.js does not support native browser IndexedDB out-of-the-box, the cryptography module is configured to use an **in-memory crypto store** (`useIndexedDB: false`).
+
+---
+
+### The Historical Message Decryption Limitation ⚠️
+
+You will notice that **older messages sent before the MCP server was set up/running cannot be decrypted** (they will appear as `[unable to decrypt — key not yet received]`). 
+
+**Is this behavior true and expected? Yes! Here is why:**
+
+1. **How E2EE Works in Matrix**: Under Matrix's Megolm/Olm encryption protocol, when someone sends a message, their client encrypts the message with a temporary session key. Their client then securely shares this session key *only* with the devices that are currently registered and online in that room at that exact moment.
+2. **New Device Registration**: Because the MCP server is treated as a **brand new device**, it was not present when those historical messages were sent. Thus, it never received the session keys needed to decrypt them.
+3. **In-Memory Store Re-initialization**: Every time Claude Desktop restarts or the MCP server wakes up/restarts, it performs a new login, registers a new device ID, and starts with a completely empty in-memory cryptography database. It has no history of previous cryptographic keys.
+4. **Decrypting New Messages**: Only messages sent **while the MCP server is actively running and synced** can be decrypted. When other users or your own client send new messages, their devices will see the MCP server's active device ID and share the encryption keys with it, allowing seamless decryption.
+
+### Tips for Verification
+
+1. Keep Claude Desktop open or make sure the MCP server is connected.
+2. Send a new message from a client like Element in an encrypted room.
+3. Ask Claude: *"Get messages from [Encrypted Room Name]"*. You should see the newly sent message fully decrypted!
 
 ---
 
