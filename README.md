@@ -45,14 +45,16 @@ matrix-selfhost/
 ├── mcp-server/                 — MCP server for Claude Desktop
 │   ├── index.js                — entry point: sets up WebCrypto, protects stdout, loads .env
 │   ├── server.js               — registers MCP tools
-│   ├── matrixClient.js         — Matrix client with silenced SDK logs
+│   ├── matrixClient.js         — Matrix client with E2EE Rust Crypto initialization
+│   ├── cryptoCache.js          — SQLite decryption cache driver
+│   ├── decrypted_cache.db      — SQLite database (local cache, ignored by Git)
 │   ├── tools/
 │   │   ├── listRooms.js        — list_rooms tool
 │   │   ├── getMessages.js      — get_messages tool
 │   │   └── searchMessages.js   — search_messages tool
 │   ├── .env                    — your credentials
 │   └── package.json
-└── bot/                        — bot fuctions
+└── bot/                        — bot functions
     ├── listener.js
     ├── summarize.js
     └── package.json
@@ -341,32 +343,28 @@ Once messages are in your rooms, ask Claude naturally:
 
 ## End-to-End Encryption (E2EE) Support
 
-This MCP server supports reading and searching messages inside end-to-end encrypted (E2EE) rooms. Here is how it works and what limitations to expect:
+The MCP server fully supports reading and searching messages inside end-to-end encrypted (E2EE) rooms. To handle E2EE securely and persist decrypted message history across server restarts, the system uses a **Hybrid Memory + SQLite Caching** approach.
 
-### How it Works (The Cryptographic Approach)
+### Architectural Approach
 
-1. **Rust Cryptography SDK**: The MCP server uses the Matrix Rust SDK cryptography library (integrated into `matrix-js-sdk`) to handle decryption.
-2. **Device Registration**: When the MCP server logs into your homeserver, it registers itself as a new device associated with your user account.
-3. **In-Memory Key Storage**: Since Node.js does not support native browser IndexedDB out-of-the-box, the cryptography module is configured to use an **in-memory crypto store** (`useIndexedDB: false`).
+1. **Rust Cryptography Core**: The MCP server initializes the Matrix Rust SDK cryptography library (via `matrix-js-sdk`) when starting up.
+2. **Dynamic Device Registration**: When logging in, the MCP server registers itself as a new device under your account to receive active key distributions.
+3. **Decryption Event Listener**: The server listens to `"Event.decrypted"` events. When the client successfully decrypts an E2EE message, the plaintext contents are immediately persisted locally.
+4. **SQLite Cache Layer**: A local, Git-ignored SQLite database (`mcp-server/decrypted_cache.db`) stores the decrypted messages (event ID, room ID, sender, timestamp, body, and message type).
+5. **Decryption Fallback**: If the Node.js process restarts, its in-memory cryptography keys are cleared. When querying message history:
+   - For events that cannot be decrypted using current in-memory keys, the server queries the SQLite cache by event ID.
+   - If the message has been cached during a previous run, the server seamlessly loads the cached plaintext (marked with `🔑 decrypted from cache`).
 
 ---
 
-### The Historical Message Decryption Limitation ⚠️
+### Decryption Behavior & Edge Cases ⚠️
 
-You will notice that **older messages sent before the MCP server was set up/running cannot be decrypted** (they will appear as `[unable to decrypt — key not yet received]`). 
+Due to the nature of the Matrix E2EE protocol (Megolm/Olm), there are key decryption edge cases to be aware of:
 
-**Is this behavior true and expected? Yes! Here is why:**
-
-1. **How E2EE Works in Matrix**: Under Matrix's Megolm/Olm encryption protocol, when someone sends a message, their client encrypts the message with a temporary session key. Their client then securely shares this session key *only* with the devices that are currently registered and online in that room at that exact moment.
-2. **New Device Registration**: Because the MCP server is treated as a **brand new device**, it was not present when those historical messages were sent. Thus, it never received the session keys needed to decrypt them.
-3. **In-Memory Store Re-initialization**: Every time Claude Desktop restarts or the MCP server wakes up/restarts, it performs a new login, registers a new device ID, and starts with a completely empty in-memory cryptography database. It has no history of previous cryptographic keys.
-4. **Decrypting New Messages**: Only messages sent **while the MCP server is actively running and synced** can be decrypted. When other users or your own client send new messages, their devices will see the MCP server's active device ID and share the encryption keys with it, allowing seamless decryption.
-
-### Tips for Verification
-
-1. Keep Claude Desktop open or make sure the MCP server is connected.
-2. Send a new message from a client like Element in an encrypted room.
-3. Ask Claude: *"Get messages from [Encrypted Room Name]"*. You should see the newly sent message fully decrypted!
+*   **New Messages (Fully Decrypted):** When the MCP server is actively running, all incoming encrypted messages are decrypted in real-time and saved to the SQLite database.
+*   **Restart Resilience (Fully Decrypted):** If Claude Desktop or the MCP server restarts, any messages decrypted in previous sessions remain readable because they are fetched from the local SQLite cache.
+*   **Offline Messages (Undecryptable):** If messages are sent in a room *while the MCP server is shut down / offline*, those messages cannot be decrypted. Since the server was offline, it was never part of the session key exchange. They will show as `[unable to decrypt — key not yet received]`.
+*   **Pre-Setup History (Undecryptable):** Historical messages sent *before the MCP server was first initialized* cannot be decrypted for the same reason—the keys were never shared with the MCP server's device.
 
 ---
 
