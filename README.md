@@ -49,9 +49,15 @@ matrix-selfhost/
 │   ├── cryptoCache.js          — SQLite decryption cache driver
 │   ├── decrypted_cache.db      — SQLite database (local cache, ignored by Git)
 │   ├── tools/
-│   │   ├── listRooms.js        — list_rooms tool
+│   │   ├── createRoom.js       — create_room tool
 │   │   ├── getMessages.js      — get_messages tool
-│   │   └── searchMessages.js   — search_messages tool
+│   │   ├── getRoomMembers.js   — get_room_members tool
+│   │   ├── inviteUser.js       — invite_user tool
+│   │   ├── joinRoom.js         — join_room tool
+│   │   ├── leaveRoom.js        — leave_room tool
+│   │   ├── listRooms.js        — list_rooms tool
+│   │   ├── searchMessages.js   — search_messages tool
+│   │   └── sendMessage.js      — send_message tool
 │   ├── .env                    — your credentials
 │   └── package.json
 └── bot/                        — bot functions
@@ -338,6 +344,12 @@ Once messages are in your rooms, ask Claude naturally:
 | `list_rooms` | Lists all rooms your account has joined. Marks encrypted rooms with 🔒 and unencrypted rooms with ✅. |
 | `get_messages` | Returns recent messages from a room, attempting to decrypt messages in encrypted rooms. |
 | `search_messages` | Searches for a keyword across all rooms (both encrypted and unencrypted), skipping messages that cannot be decrypted. |
+| `send_message` | Sends a message to a Matrix room (supports optional HTML formatting). |
+| `get_room_members` | Lists all members in a Matrix room, including display names, membership status, and power levels. |
+| `join_room` | Joins a Matrix room by its ID or alias. |
+| `leave_room` | Leaves a Matrix room by its ID. |
+| `invite_user` | Invites a user to a Matrix room. |
+| `create_room` | Creates a new Matrix room with optional encryption, name, topic, and invitees. |
 
 ---
 
