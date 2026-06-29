@@ -18,6 +18,11 @@ const silentLogger = {
 Object.assign(matrixLogger, silentLogger);
 matrixLogger.disableAll();
 
+export function setMockClient(mockClient) {
+  client = mockClient;
+  syncReady = true;
+}
+
 export async function getClient() {
   if (client && syncReady) return client;
 
