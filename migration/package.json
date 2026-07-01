@@ -1,0 +1,10 @@
+{
+  "name": "matrix-migration",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "matrix-js-sdk": "^41.8.0",
+    "dotenv": "^17.4.2",
+    "@matrix-org/matrix-sdk-crypto-nodejs": "^0.6.1"
+  }
+}

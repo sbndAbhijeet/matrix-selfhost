@@ -60,6 +60,12 @@ matrix-selfhost/
 │   │   └── sendMessage.js      — send_message tool
 │   ├── .env                    — your credentials
 │   └── package.json
+├── migration/                  — public-to-private history migration tools
+│   ├── export.js               — exports room list, media, and E2EE backup keys
+│   ├── import.js               — registers local users, creates rooms, replays timelines
+│   ├── clean_rooms.js          — purges duplicate rooms using Synapse Admin API
+│   ├── .env                    — migration server credentials (ignored)
+│   └── package.json
 └── bot/                        — bot functions
     ├── listener.js
     ├── summarize.js
@@ -380,7 +386,105 @@ Due to the nature of the Matrix E2EE protocol (Megolm/Olm), there are key decryp
 
 ---
 
+## History Migration: Public to Private Homeserver
 
+The `migration/` package provides a utility to export account history (rooms, memberships, historical E2EE decryption keys, messages, and attachments) from a public Matrix server (e.g. `matrix.org`) and replay them on your private local homeserver.
+
+### Architectural Features
+* **SSSS Key Recovery**: Decrypts Secure Shared Secret Storage (SSSS) on `matrix.org` using your Recovery Key (`Esta...`), extracts the Megolm backup key, and decrypts historical E2EE rooms.
+* **Persistent Sessions**: Reuses access tokens and device IDs to prevent spamming your account with unverified sessions.
+* **Appservice Provisioning**: Uses Synapse Application Service authentication to register users and force-join them into rooms.
+* **PostgreSQL Password Sync**: If accounts already exist, the script runs direct `docker exec` database modifications inside Postgres and Synapse to sync credentials safely.
+* **Timestamp Massaging**: Appends original event timestamps (`?ts=`) on messages so room history is backdated correctly.
+* **Multi-User Idempotency**: Saves room mappings to `migration/data/room-mappings.json` to prevent creating duplicate rooms when multiple users run the migration. It also uses deterministic transaction IDs derived from original event IDs to let Synapse automatically deduplicate timeline events, preventing duplicate messages on subsequent runs.
+
+### Setup
+
+#### 1. One-Time Synapse Configuration (Appservice Setup)
+Since your Synapse configurations and application service secrets are local (and not committed to Git), you must configure Synapse to recognize the migration appservice:
+
+1. **Create the Registration File**:
+   Create a new file at `synapse/appservice-registration.yaml` with the following content:
+   ```yaml
+   id: migration-appservice
+   url: null
+   as_token: "migration_secret_as_token_12345"
+   hs_token: "migration_secret_hs_token_12345"
+   sender_localpart: migration-admin
+   rate_limited: false
+   namespaces:
+     users:
+       - exclusive: false
+         regex: "@.*:matrix.wetec-server.com"
+   ```
+
+2. **Fix File Permissions**:
+   Synapse requires files in its data mount to be owned by its internal process owner (`systemd-resolve`). Run the following command in WSL to update ownership:
+   ```bash
+   wsl -u root chown systemd-resolve:systemd-resolve synapse/appservice-registration.yaml
+   ```
+
+3. **Link in `homeserver.yaml`**:
+   Open your active `synapse/homeserver.yaml` file, scroll to the bottom, and register the appservice config path:
+   ```yaml
+   app_service_config_files:
+     - "/data/appservice-registration.yaml"
+   ```
+
+4. **Restart Synapse**:
+   Restart the container to load the new appservice configuration:
+   ```bash
+   docker restart matrix-synapse
+   ```
+
+#### 2. Migration Script Setup
+
+1. Navigate to the `migration/` folder and install dependencies:
+   ```bash
+   cd migration
+   npm install
+   ```
+
+2. Copy the template environment file:
+   ```bash
+   cp .env.example .env
+   ```
+
+3. Fill out the variables in `migration/.env`:
+   * `PUBLIC_HOMESERVER`: `https://matrix.org`
+   * `PUBLIC_USER_ID`: `@your_name:matrix.org`
+   * `PUBLIC_PASSWORD`: Your password
+   * `PUBLIC_RECOVERY_KEY`: Your 48-character Secure Backup Security Key (`Esta ABCD...`)
+   * `PRIVATE_HOMESERVER`: `http://localhost:8008` (your local homeserver address)
+   * `APPSERVICE_TOKEN`: The `as_token` configured in `synapse/appservice-registration.yaml` (`migration_secret_as_token_12345`)
+
+### Running the Migration
+
+#### Step 1: Export from Public Server
+Run the export script:
+```bash
+node export.js
+```
+* **First Run (Session Reuse Setup)**: The script will log in with your password and print a `PUBLIC_ACCESS_TOKEN` and `PUBLIC_DEVICE_ID` block. Copy and paste these into your `.env` file. This prevents the script from creating new unverified devices on your account.
+* Once completed, your encrypted history is exported to `migration/data/history-YOUR_USER_ID.json` and attachments are downloaded locally.
+
+#### Step 2: Clean up Local Server (Optional)
+If you have previously run imports and want to clear out duplicate room registrations on your local development server, run:
+```bash
+node clean_rooms.js
+```
+This script will temporarily log in as `@admin` (resetting its password in Postgres to `TempAdminPassword123!`), query all active rooms via Synapse Admin APIs, and purge them from the server to ensure a clean slate.
+
+#### Step 3: Import to Local Server
+Run the import script:
+```bash
+node import.js --file data/history-_your_username_matrix_org.json
+```
+* The script registers all unique users from the history. If a user already exists, it uses Docker to reset their password directly in Postgres.
+* It recreates all rooms under their original creator, invites and joins other members, restores power levels, uploads attachments, and backdates all messages.
+* All generated usernames and passwords are saved to `migration/data/new-user-credentials.txt`.
+
+---
 
 ## Bot Setup
 

@@ -20,8 +20,9 @@ synapse/media_store/
 
 # Synapse runtime configuration and security keys
 synapse/*.signing.key
-synapse/homeserver.yaml
+**/homeserver.yaml
 synapse/*.log.config
+*appservice-registration.yaml
 
 # Matrix cryptography local stores
 crypto-store/

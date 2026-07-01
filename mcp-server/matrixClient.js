@@ -1,6 +1,9 @@
 import sdk from "matrix-js-sdk";
 import { logger as matrixLogger } from "matrix-js-sdk/lib/logger.js";
-import { saveMessageToCache } from "./cryptoCache.js";
+import { loadBinding } from "@matrix-org/matrix-sdk-crypto-nodejs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { mkdirSync } from "node:fs";
 
 let client = null;
 let syncReady = false;
@@ -18,10 +21,14 @@ const silentLogger = {
 Object.assign(matrixLogger, silentLogger);
 matrixLogger.disableAll();
 
-export function setMockClient(mockClient) {
-  client = mockClient;
-  syncReady = true;
-}
+const currentDir = dirname(fileURLToPath(import.meta.url));
+const cryptoStorePath = join(currentDir, "crypto-store");
+
+mkdirSync(cryptoStorePath, { recursive: true });
+
+// Load the native Node.js crypto binding.
+// This MUST happen before initRustCrypto() so the SDK uses SQLite, not IndexedDB.
+loadBinding();
 
 export async function getClient() {
   if (client && syncReady) return client;
@@ -55,25 +62,12 @@ export async function getClient() {
     store: new sdk.MemoryStore({ localStorage: null }),
   });
 
-  // Step 3 — init Rust crypto using in-memory store (as Node.js does not support native IndexedDB)
+  // Step 3 — init Rust crypto using native SQLite store (not IndexedDB)
   await client.initRustCrypto({
-    useIndexedDB: false,
+    storePath: join(cryptoStorePath, "matrix-crypto.db"),
   });
 
-  // Listen for successfully decrypted events and cache them
-  client.on("Event.decrypted", async (event) => {
-    try {
-      if (event.getType() !== "m.room.message") return;
-      if (event.isDecryptionFailure()) return;
-      await saveMessageToCache(event);
-    } catch (err) {
-      // Fail silently to avoid breaking the client's internal timeline processing loop
-    }
-  });
-
-  if (typeof client.setGlobalErrorOnUnknownDevices === "function") {
-    client.setGlobalErrorOnUnknownDevices(false);
-  }
+  client.setGlobalErrorOnUnknownDevices(false);
 
   client.startClient({
     initialSyncLimit: 50,
