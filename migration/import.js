@@ -126,8 +126,11 @@ async function run() {
         }
       } else {
         console.log(`Successfully created: ${localUserId}`);
-        // Save to credentials log
-        await fs.appendFile(credentialsPath, `User: ${localUserId} | Temp Password: ${tempPassword}\n`, "utf8");
+        const success = updatePasswordInDb(localUserId, tempPassword);
+        if (success) {
+          // Save to credentials log
+          await fs.appendFile(credentialsPath, `User: ${localUserId} | Temp Password: ${tempPassword}\n`, "utf8");
+        }
       }
     } catch (err) {
       console.error(`Failed to create account for ${localUserId}:`, err.message);

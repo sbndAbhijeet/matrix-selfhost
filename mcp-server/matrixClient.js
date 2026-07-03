@@ -1,12 +1,19 @@
 import sdk from "matrix-js-sdk";
 import { logger as matrixLogger } from "matrix-js-sdk/lib/logger.js";
-import { loadBinding } from "@matrix-org/matrix-sdk-crypto-nodejs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import setGlobalVars from "indexeddbshim";
+
+setGlobalVars(globalThis, { checkOrigin: false });
 
 let client = null;
 let syncReady = false;
+
+export function setMockClient(mockClient) {
+  client = mockClient;
+  syncReady = true;
+}
 
 const silentLogger = {
   trace: () => { },
@@ -25,10 +32,6 @@ const currentDir = dirname(fileURLToPath(import.meta.url));
 const cryptoStorePath = join(currentDir, "crypto-store");
 
 mkdirSync(cryptoStorePath, { recursive: true });
-
-// Load the native Node.js crypto binding.
-// This MUST happen before initRustCrypto() so the SDK uses SQLite, not IndexedDB.
-loadBinding();
 
 function saveCredentialsToEnv(token, deviceId) {
   try {
@@ -117,10 +120,12 @@ export async function getClient() {
       });
 
       await client.initRustCrypto({
-        storePath: join(cryptoStorePath, "matrix-crypto.db"),
+        useIndexedDB: false,
       });
 
-      client.setGlobalErrorOnUnknownDevices(false);
+      if (typeof client.setGlobalErrorOnUnknownDevices === "function") {
+        client.setGlobalErrorOnUnknownDevices(false);
+      }
 
       client.startClient({
         initialSyncLimit: 50,
@@ -169,10 +174,12 @@ export async function getClient() {
     });
 
     await client.initRustCrypto({
-      storePath: join(cryptoStorePath, "matrix-crypto.db"),
+      useIndexedDB: false,
     });
 
-    client.setGlobalErrorOnUnknownDevices(false);
+    if (typeof client.setGlobalErrorOnUnknownDevices === "function") {
+      client.setGlobalErrorOnUnknownDevices(false);
+    }
 
     client.startClient({
       initialSyncLimit: 50,
