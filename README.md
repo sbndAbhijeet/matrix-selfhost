@@ -4,6 +4,16 @@ A self-hosted Matrix (Synapse) server with a Claude-powered MCP server that lets
 
 ---
 
+## Demo
+
+https://github.com/user/repo/assets/demo.mp4
+
+[Watch the Demo Video](demo.mp4)
+
+<video src="demo.mp4" width="100%" controls></video>
+
+---
+
 ## What this project does
 
 - Runs a private Matrix homeserver (Synapse) and PostgreSQL database via Docker.
