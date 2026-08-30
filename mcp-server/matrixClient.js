@@ -96,6 +96,8 @@ export async function getClient() {
   if (client && syncReady) return client;
 
   const requiredEnv = ["MATRIX_BASE_URL", "MATRIX_USER_ID", "MATRIX_PASSWORD"];
+
+  //checks if all env variables are present
   const missingEnv = requiredEnv.filter((name) => !process.env[name]);
   if (missingEnv.length > 0) {
     throw new Error(`Missing Matrix environment variables: ${missingEnv.join(", ")}`);
@@ -122,10 +124,6 @@ export async function getClient() {
       await client.initRustCrypto({
         useIndexedDB: false,
       });
-
-      if (typeof client.setGlobalErrorOnUnknownDevices === "function") {
-        client.setGlobalErrorOnUnknownDevices(false);
-      }
 
       client.startClient({
         initialSyncLimit: 50,
@@ -176,10 +174,6 @@ export async function getClient() {
     await client.initRustCrypto({
       useIndexedDB: false,
     });
-
-    if (typeof client.setGlobalErrorOnUnknownDevices === "function") {
-      client.setGlobalErrorOnUnknownDevices(false);
-    }
 
     client.startClient({
       initialSyncLimit: 50,

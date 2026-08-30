@@ -11,7 +11,9 @@ if (typeof Promise.withResolvers === "undefined") {
   };
 }
 
-globalThis.crypto = webcrypto;
+if (!globalThis.crypto) {
+  globalThis.crypto = webcrypto;
+}
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
