@@ -494,6 +494,8 @@ node import.js --file data/history-_your_username_matrix_org.json
 * It recreates all rooms under their original creator, invites and joins other members, restores power levels, uploads attachments, and backdates all messages.
 * All generated usernames and passwords are saved to `migration/data/new-user-credentials.txt`.
 
+After migration is finished, remove the appservice registration from homeserver.yaml and restart Synapse. The appservice token is powerful — do not leave it enabled longer than needed.
+
 ---
 
 ## Bot Setup
