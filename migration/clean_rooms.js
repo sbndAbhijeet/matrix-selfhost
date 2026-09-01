@@ -3,6 +3,7 @@ import * as dotenv from "dotenv";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
+import { resetUserPassword } from "./adminApi.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__dirname, ".env"), override: true });
@@ -11,28 +12,40 @@ const PRIVATE_HOMESERVER = process.env.PRIVATE_HOMESERVER || "http://localhost:8
 const ADMIN_USER_ID = "@admin:matrix.wetec-server.com";
 const TEMP_ADMIN_PASSWORD = "TempAdminPassword123!";
 
-function resetAdminPassword() {
-  try {
-    console.log(`Resetting database password for admin: ${ADMIN_USER_ID}...`);
-    // 1. Generate bcrypt hash using synapse container python
-    const hashCmd = `docker exec matrix-synapse python3 -c "import bcrypt; print(bcrypt.hashpw(b'${TEMP_ADMIN_PASSWORD}', bcrypt.gensalt()).decode('utf-8'))"`;
-    const hash = execSync(hashCmd).toString().trim();
+
+
+// function resetAdminPassword() {
+//   try {
+//     console.log(`Resetting database password for admin: ${ADMIN_USER_ID}...`);
+//     // 1. Generate bcrypt hash using synapse container python
+//     const hashCmd = `docker exec matrix-synapse python3 -c "import bcrypt; print(bcrypt.hashpw(b'${TEMP_ADMIN_PASSWORD}', bcrypt.gensalt()).decode('utf-8'))"`;
+//     const hash = execSync(hashCmd).toString().trim();
     
-    // 2. Update in postgres
-    const sql = `UPDATE users SET password_hash = '${hash}' WHERE name = '${ADMIN_USER_ID}'`;
-    const updateCmd = `docker exec matrix-postgres psql -U synapse -d synapse -c "${sql}"`;
-    execSync(updateCmd);
+//     // 2. Update in postgres
+//     const sql = `UPDATE users SET password_hash = '${hash}' WHERE name = '${ADMIN_USER_ID}'`;
+//     const updateCmd = `docker exec matrix-postgres psql -U synapse -d synapse -c "${sql}"`;
+//     execSync(updateCmd);
     
-    console.log("Admin password successfully reset in Postgres database.");
-    return true;
-  } catch (err) {
-    console.error("Failed to reset admin password in database:", err.message);
-    return false;
-  }
-}
+//     console.log("Admin password successfully reset in Postgres database.");
+//     return true;
+//   } catch (err) {
+//     console.error("Failed to reset admin password in database:", err.message);
+//     return false;
+//   }
+// }
 
 async function clean() {
-  if (!resetAdminPassword()) {
+  console.log(`Resetting password for admin: ${ADMIN_USER_ID}...`);
+  try {
+    await resetUserPassword(
+      ADMIN_USER_ID,
+      TEMP_ADMIN_PASSWORD,
+      process.env.ADMIN_TOKEN,
+      PRIVATE_HOMESERVER
+    );
+    console.log("Admin password successfully reset via Admin API.");
+  } catch (err) {
+    console.error("Failed to reset admin password:", err.message);
     process.exit(1);
   }
 

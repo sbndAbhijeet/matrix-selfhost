@@ -4,6 +4,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
+import { resetUserPassword } from "./adminApi.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -23,7 +24,7 @@ const args = process.argv.slice(2);
 const fileArgIdx = args.indexOf("--file");
 if (fileArgIdx === -1 || !args[fileArgIdx + 1]) {
   console.error("Error: Please specify the export file to import using --file <path>");
-  console.exit(1);
+  process.exit(1);
 }
 
 const importFilePath = path.resolve(args[fileArgIdx + 1]);
@@ -36,7 +37,7 @@ function mapUserId(publicUserId) {
 }
 
 function generateTempPassword() {
-  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*";
+  const chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
   let password = "";
   for (let i = 0; i < 16; i++) {
     password += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -44,22 +45,25 @@ function generateTempPassword() {
   return password;
 }
 
-function updatePasswordInDb(userId, password) {
-  try {
-    const hashCmd = `docker exec matrix-synapse python3 -c "import bcrypt; print(bcrypt.hashpw(b'${password}', bcrypt.gensalt()).decode('utf-8'))"`;
-    const hash = execSync(hashCmd).toString().trim();
+
+// Updating via admin api
+
+// function updatePasswordInDb(userId, password) {
+//   try {
+//     const hashCmd = `docker exec matrix-synapse python3 -c "import bcrypt; print(bcrypt.hashpw(b'${password}', bcrypt.gensalt()).decode('utf-8'))"`;
+//     const hash = execSync(hashCmd).toString().trim();
     
-    const sql = `UPDATE users SET password_hash = '${hash}' WHERE name = '${userId}'`;
-    const updateCmd = `docker exec matrix-postgres psql -U synapse -d synapse -c "${sql}"`;
-    execSync(updateCmd);
+//     const sql = `UPDATE users SET password_hash = '${hash}' WHERE name = '${userId}'`;
+//     const updateCmd = `docker exec matrix-postgres psql -U synapse -d synapse -c "${sql}"`;
+//     execSync(updateCmd);
     
-    console.log(`Successfully reset password in database for: ${userId}`);
-    return true;
-  } catch (err) {
-    console.error(`Failed to reset password in database for ${userId}:`, err.message);
-    return false;
-  }
-}
+//     console.log(`Successfully reset password in database for: ${userId}`);
+//     return true;
+//   } catch (err) {
+//     console.error(`Failed to reset password in database for ${userId}:`, err.message);
+//     return false;
+//   }
+// }
 
 async function run() {
   console.log(`Step 1: Reading export data from: ${importFilePath}...`);
@@ -117,7 +121,12 @@ async function run() {
       if (!response.ok) {
         if (resBody.errcode === "M_USER_IN_USE") {
           console.log(`User ${localUserId} already exists on the server. Resetting password in database...`);
-          const success = updatePasswordInDb(localUserId, tempPassword);
+          const success = await resetUserPassword(
+                              localUserId, 
+                              tempPassword, 
+                              process.env.ADMIN_TOKEN, 
+                              process.env.PRIVATE_HOMESERVER
+                            );
           if (success) {
             await fs.appendFile(credentialsPath, `User: ${localUserId} | Temp Password: ${tempPassword}\n`, "utf8");
           }
@@ -126,7 +135,12 @@ async function run() {
         }
       } else {
         console.log(`Successfully created: ${localUserId}`);
-        const success = updatePasswordInDb(localUserId, tempPassword);
+        const success = await resetUserPassword(
+                              localUserId, 
+                              tempPassword, 
+                              process.env.ADMIN_TOKEN, 
+                              process.env.PRIVATE_HOMESERVER
+                            );
         if (success) {
           // Save to credentials log
           await fs.appendFile(credentialsPath, `User: ${localUserId} | Temp Password: ${tempPassword}\n`, "utf8");
