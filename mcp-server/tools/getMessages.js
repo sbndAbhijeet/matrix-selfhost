@@ -18,11 +18,21 @@ export async function getMessages({ roomId, limit = 30 }) {
 
   const encrypted = isRoomEncrypted(room);
 
+  // requests a bit more than the user asked for so we have a buffer
+  const fetchLimit = Math.max(limit, 50); // at least 50, or whatever the user asked
+  try {
+    await client.scrollback(room, fetchLimit);
+  } catch (err) {
+    console.error(`[getMessages] scrollback failed for ${roomId}:`, err.message);
+    //continue anyway with whatever is already in the timeline
+  }
+
+  // Now read the timeline (it should contain more messages)
   const events = room
     .getLiveTimeline()
     .getEvents()
     .filter((e) => e.getType() === "m.room.message")
-    .slice(-limit);
+    .slice(-limit); // still respect the limit the user requested
 
   if (events.length === 0) {
     return {
@@ -56,7 +66,7 @@ export async function getMessages({ roomId, limit = 30 }) {
             return `[${time}] ${sender}: ${body} (🔑 decrypted from cache)`;
           }
         } catch (err) {
-          // Fall through to failure message if database query fails
+          // Fall through
         }
 
         decryptFailures++;
@@ -78,12 +88,23 @@ export async function getMessages({ roomId, limit = 30 }) {
   const encNote = encrypted ? " 🔒 (end-to-end encrypted)" : "";
   const header = `📋 Last ${messages.length} messages from "${room.name}"${encNote}:\n\n`;
 
+  // tells the user if we got fewer messages than requested
+  const truncationNote =
+    messages.length < limit
+      ? `\n\nNote: Only ${messages.length} messages were available (requested ${limit}). Older history may exist on the server.`
+      : "";
+
   const footer =
     decryptFailures > 0
-      ? `\n\n⚠️ ${decryptFailures} message(s) could not be decrypted. This usually means the room keys for those messages haven't been shared with this device yet. Messages sent after this device joined will decrypt normally.`
+      ? `\n\n⚠️ ${decryptFailures} message(s) could not be decrypted. This usually means the room keys for those messages haven't been shared with this device yet.`
       : "";
 
   return {
-    content: [{ type: "text", text: header + messages.join("\n") + footer }],
+    content: [
+      {
+        type: "text",
+        text: header + messages.join("\n") + truncationNote + footer,
+      },
+    ],
   };
 }
