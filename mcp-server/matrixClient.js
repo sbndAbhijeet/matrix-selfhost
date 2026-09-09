@@ -3,6 +3,7 @@ import { logger as matrixLogger } from "matrix-js-sdk/lib/logger.js";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { saveMessageToCache } from "./cryptoCache.js";
 import setGlobalVars from "indexeddbshim";
 
 setGlobalVars(globalThis, { checkOrigin: false });
@@ -92,6 +93,30 @@ async function waitForSync(sdkClient) {
   });
 }
 
+function setupDecryptionCache(sdkClient) {
+  // Save every successfully decrypted message to the local cache
+  sdkClient.on("Event.decrypted", (event) => {
+    if (event.getType() === "m.room.message" && !event.isDecryptionFailure()) {
+      saveMessageToCache(event).catch((err) => {
+        console.error("[matrixClient] Failed to save message to cache:", err.message);
+      });
+    }
+  });
+
+  // catch messages that were already decrypted when they arrived
+  sdkClient.on("event", (event) => {
+    if (
+      event.getType() === "m.room.message" &&
+      !event.isDecryptionFailure() &&
+      event.getContent()?.body
+    ) {
+      saveMessageToCache(event).catch((err) => {
+        console.error("[matrixClient] Failed to save message to cache:", err.message);
+      });
+    }
+  });
+}
+
 export async function getClient() {
   if (client && syncReady) return client;
 
@@ -131,6 +156,7 @@ export async function getClient() {
       });
 
       await waitForSync(client);
+      setupDecryptionCache(client);
       clientSuccess = true;
       syncReady = true;
       console.error(`[matrixClient] Session resumed successfully!`);
@@ -183,6 +209,7 @@ export async function getClient() {
     await waitForSync(client);
     syncReady = true;
 
+    setupDecryptionCache(client);
     saveCredentialsToEnv(newAccessToken, newDeviceId);
   }
 
