@@ -31,7 +31,7 @@ server.tool(
   "Get recent messages from a Matrix room, including encrypted rooms. The client attempts decryption and may recover previously cached plaintext. Individual messages without available keys are marked unable to decrypt; do not assume all encrypted rooms are unreadable.",
   {
     roomId: z.string().describe("The room ID, e.g. !abc123:matrix.wetec-server.com"),
-    limit: z.number().optional().default(30).describe("How many recent messages to fetch (default 30)"),
+    limit: z.number().int().min(1).max(200).optional().default(30).describe("How many recent messages to fetch (1–200; default 30)"),
   },
   getMessages
 );
