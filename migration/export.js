@@ -143,6 +143,13 @@ async function run() {
     const powerLevelsEvent = room.currentState.getStateEvents("m.room.power_levels", "");
     const powerLevels = powerLevelsEvent ? powerLevelsEvent.getContent() : null;
 
+    // The sender of m.room.create is the creator, including room versions without content.creator.
+    const createEvent = room.currentState.getStateEvents("m.room.create", "");
+    const creator = createEvent?.getSender();
+    if (!creator) {
+      throw new Error(`Could not determine the creator of room ${room.roomId}`);
+    }
+
     // Get members
     const members = room.getMembers().map(m => ({
       userId: m.userId,
@@ -222,6 +229,7 @@ async function run() {
     exportedData.rooms.push({
       room_id: room.roomId,
       name: room.name,
+      creator: creator,
       is_encrypted: isEncrypted,
       power_levels: powerLevels,
       members: members,

@@ -91,6 +91,11 @@ async function run() {
   if (encryptedRooms.length) {
     console.warn(`WARNING: ${encryptedRooms.length} encrypted source room(s) will be recreated without encryption. Their imported messages will be stored as plaintext on the destination homeserver.`);
   }
+  const roomsWithoutCreator = data.rooms.filter(room => !roomMappings[room.room_id] &&
+    (typeof room.creator !== "string" || !/^@[^:]+:.+$/.test(room.creator)));
+  if (roomsWithoutCreator.length) {
+    throw new Error(`${roomsWithoutCreator.length} room(s) have no valid creator in the export. Re-export with the updated exporter before importing; member order cannot identify the original creator.`);
+  }
 
   const credentialsPath = path.join(dataDir, "new-user-credentials.txt");
   await fs.mkdir(dataDir, { recursive: true });
@@ -100,6 +105,7 @@ async function run() {
 
   // Add all room members and message senders to the set of users to create
   for (const room of data.rooms) {
+    if (room.creator) uniquePublicUsers.add(room.creator);
     for (const m of room.members) {
       if (m.userId) uniquePublicUsers.add(m.userId);
     }
@@ -185,15 +191,9 @@ async function run() {
       await new Promise(resolve => setTimeout(resolve, 1000));
       console.log(`\nRecreating Room: "${room.name}" (Old ID: ${oldRoomId})`);
 
-      // Determine Room Creator (first member who is registered)
+      // The original creator may have left the source room, so it need not be in members.
       const membersList = room.members.map(m => mapUserId(m.userId));
-      const roomCreator = membersList[0];
-
-      if (!roomCreator) {
-        console.warn(`Skipping room "${room.name}" because it has no members.`);
-        replay.roomsSkipped++;
-        continue;
-      }
+      const roomCreator = mapUserId(room.creator);
 
       const creatorClient = sdk.createClient({
         baseUrl: process.env.PRIVATE_HOMESERVER,
