@@ -160,6 +160,7 @@ async function run() {
   }
 
   console.log("\nStep 3: Recreating rooms and replaying timelines...");
+  const replay = { sent: 0, failed: 0, undecryptable: 0, roomsSkipped: 0 };
   for (const room of data.rooms) {
     const oldRoomId = room.room_id;
     let newRoomId;
@@ -178,6 +179,7 @@ async function run() {
 
       if (!roomCreator) {
         console.warn(`Skipping room "${room.name}" because it has no members.`);
+        replay.roomsSkipped++;
         continue;
       }
 
@@ -212,6 +214,7 @@ async function run() {
         await fs.writeFile(mappingsPath, JSON.stringify(roomMappings, null, 2), "utf8");
       } catch (err) {
         console.error(`Failed to create room "${room.name}":`, err.message);
+        replay.roomsSkipped++;
         continue;
       }
 
@@ -262,6 +265,7 @@ async function run() {
 
       if (msg.decryption_failed) {
         console.log(`Skipping event ${msg.event_id}: Decryption failed on export.`);
+        replay.undecryptable++;
         continue;
       }
 
@@ -290,6 +294,8 @@ async function run() {
           msg.content.url = uploadRes.content_uri;
         } catch (err) {
           console.warn(`Failed to upload attachment ${msg.content.body}:`, err.message);
+          replay.failed++;
+          continue;
         }
       }
 
@@ -310,15 +316,22 @@ async function run() {
           },
           msg.content
         );
+        replay.sent++;
       } catch (err) {
         console.warn(`Failed to replay event ${msg.event_id}:`, err.message);
+        replay.failed++;
       }
     }
     console.log(`Finished replaying room: "${room.name}"`);
   }
 
-  console.log("\nMigration import complete! All rooms and timelines have been replayed.");
-  process.exit(0);
+  console.log(`\nReplay summary: ${replay.sent} sent, ${replay.failed} failed, ${replay.undecryptable} skipped (could not decrypt on export), ${replay.roomsSkipped} rooms skipped.`);
+  if (replay.failed || replay.undecryptable || replay.roomsSkipped) {
+    console.error("Migration incomplete. Review the errors above and retry after resolving them.");
+    process.exitCode = 1;
+  } else {
+    console.log("Message replay complete.");
+  }
 }
 
 run().catch(err => {
