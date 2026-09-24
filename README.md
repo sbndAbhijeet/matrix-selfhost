@@ -496,6 +496,7 @@ node import.js --file data/history-_your_username_matrix_org.json
 ```
 * The script registers all unique users from the history. If a user already exists, it uses Docker to reset their password directly in Postgres.
 * It recreates all rooms under their original creator, invites and joins other members, restores power levels, uploads attachments, and backdates all messages.
+* Newly created rooms are invite-only and hidden from the room directory, including rooms that were unencrypted on the source server. Encryption remains based on the exported room setting. Existing rooms in `migration/data/room-mappings.json` are reused as-is; check their join rules separately if they were created by an earlier import.
 * All generated usernames and passwords are saved to `migration/data/new-user-credentials.txt`.
 
 After migration is finished, remove the appservice registration from homeserver.yaml and restart Synapse. The appservice token is powerful — do not leave it enabled longer than needed.

@@ -191,7 +191,9 @@ async function run() {
       try {
         const createRes = await creatorClient.createRoom({
           name: room.name,
-          preset: room.is_encrypted ? "private_chat" : "public_chat",
+          // Encryption does not determine who can join. Keep every migrated room invite-only.
+          preset: "private_chat",
+          visibility: "private",
           initial_state: room.is_encrypted ? [
             {
               type: "m.room.encryption",
