@@ -5,6 +5,7 @@ import * as path from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
 import { resetUserPassword } from "./adminApi.js";
+import { readReplayJournal, saveReplayJournal } from "./replayJournal.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -73,11 +74,17 @@ async function run() {
 
   const dataDir = path.join(__dirname, "data");
   const mappingsPath = path.join(dataDir, "room-mappings.json");
+  const replayPath = path.join(dataDir, "replayed-events.json");
   let roomMappings = {};
   try {
     roomMappings = JSON.parse(await fs.readFile(mappingsPath, "utf8"));
   } catch (err) {
     if (err.code !== "ENOENT") throw err;
+  }
+  const replayJournal = await readReplayJournal(replayPath);
+  const ambiguousRooms = data.rooms.filter(room => roomMappings[room.room_id] && !Object.hasOwn(replayJournal, room.room_id));
+  if (ambiguousRooms.length) {
+    throw new Error(`${ambiguousRooms.length} mapped room(s) have no replay journal. A previous import may already have sent messages. Review those rooms before retrying to avoid duplicates.`);
   }
 
   const encryptedRooms = data.rooms.filter(room => room.is_encrypted);
@@ -178,7 +185,7 @@ async function run() {
     }
   }
   console.log("\nStep 3: Recreating rooms and replaying timelines...");
-  const replay = { sent: 0, failed: 0, undecryptable: 0, roomsSkipped: 0 };
+  const replay = { sent: 0, alreadySent: 0, failed: 0, undecryptable: 0, roomsSkipped: 0 };
   for (const room of data.rooms) {
     const oldRoomId = room.room_id;
     let newRoomId;
@@ -217,6 +224,8 @@ async function run() {
         // Save mapping
         roomMappings[oldRoomId] = newRoomId;
         await fs.writeFile(mappingsPath, JSON.stringify(roomMappings, null, 2), "utf8");
+        replayJournal[oldRoomId] = {};
+        await saveReplayJournal(replayPath, replayJournal);
       } catch (err) {
         console.error(`Failed to create room "${room.name}":`, err.message);
         replay.roomsSkipped++;
@@ -268,6 +277,11 @@ async function run() {
     for (const msg of room.timeline) {
       const localSender = mapUserId(msg.sender);
 
+      if (Object.hasOwn(replayJournal[oldRoomId], msg.event_id)) {
+        replay.alreadySent++;
+        continue;
+      }
+
       if (msg.decryption_failed) {
         console.log(`Skipping event ${msg.event_id}: Decryption failed on export.`);
         replay.undecryptable++;
@@ -311,8 +325,9 @@ async function run() {
       const txnId = `migration_${deterministicEventId}`;
       const sendPath = `/rooms/${encodeURIComponent(newRoomId)}/send/m.room.message/${encodeURIComponent(txnId)}`;
 
+      let sent;
       try {
-        await senderClient.http.authedRequest(
+        sent = await senderClient.http.authedRequest(
           "PUT",
           sendPath,
           {
@@ -321,16 +336,20 @@ async function run() {
           },
           msg.content
         );
-        replay.sent++;
       } catch (err) {
         console.warn(`Failed to replay event ${msg.event_id}:`, err.message);
         replay.failed++;
+        continue;
       }
+      if (!sent?.event_id) throw new Error(`Server returned no event ID for ${msg.event_id}; inspect the room before retrying`);
+      replayJournal[oldRoomId][msg.event_id] = sent.event_id;
+      await saveReplayJournal(replayPath, replayJournal);
+      replay.sent++;
     }
     console.log(`Finished replaying room: "${room.name}"`);
   }
 
-  console.log(`\nReplay summary: ${replay.sent} sent, ${replay.failed} failed, ${replay.undecryptable} skipped (could not decrypt on export), ${replay.roomsSkipped} rooms skipped.`);
+  console.log(`\nReplay summary: ${replay.sent} sent, ${replay.alreadySent} already recorded, ${replay.failed} failed, ${replay.undecryptable} skipped (could not decrypt on export), ${replay.roomsSkipped} rooms skipped.`);
   if (replay.failed || replay.undecryptable || replay.roomsSkipped) {
     console.error("Migration incomplete. Review the errors above and retry after resolving them.");
     process.exitCode = 1;
