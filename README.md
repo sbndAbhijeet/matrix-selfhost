@@ -409,7 +409,7 @@ The `migration/` package provides a utility to export account history (rooms, me
 * **Appservice Provisioning**: Uses Synapse Application Service authentication to register users and force-join them into rooms.
 * **PostgreSQL Password Sync**: If accounts already exist, the script runs direct `docker exec` database modifications inside Postgres and Synapse to sync credentials safely.
 * **Timestamp Massaging**: Appends original event timestamps (`?ts=`) on messages so room history is backdated correctly.
-* **Multi-User Idempotency**: Saves room mappings to `migration/data/room-mappings.json` to prevent creating duplicate rooms when multiple users run the migration. It also uses deterministic transaction IDs derived from original event IDs to let Synapse automatically deduplicate timeline events, preventing duplicate messages on subsequent runs.
+* **Replay Journal**: Saves room mappings to `migration/data/room-mappings.json` and successfully replayed event IDs to `migration/data/replayed-events.json`, skipping recorded events on later runs. Keep both files together. Older room mappings without an event journal require manual review before retrying. A crash after Synapse accepts a message but before its event ID is saved can still cause a duplicate on retry.
 
 ### Setup
 

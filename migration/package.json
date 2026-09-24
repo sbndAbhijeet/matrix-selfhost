@@ -2,6 +2,9 @@
   "name": "matrix-migration",
   "version": "1.0.0",
   "type": "module",
+  "scripts": {
+    "test": "node --test test-replay-journal.js"
+  },
   "dependencies": {
     "matrix-js-sdk": "^41.8.0",
     "dotenv": "^17.4.2",
