@@ -20,7 +20,7 @@ const server = new McpServer({
 // Tool: list all rooms you are in
 server.tool(
   "list_rooms",
-  "List all Matrix rooms you are a member of, showing which are readable vs encrypted",
+  "List joined Matrix rooms and show whether each room uses end-to-end encryption. Encrypted rooms may still be readable with available keys; use get_messages to check.",
   {},
   listRooms
 );
@@ -28,7 +28,7 @@ server.tool(
 // Tool: get messages from a specific room
 server.tool(
   "get_messages",
-  "Get recent messages from a Matrix room. Will refuse and explain if the room is encrypted.",
+  "Get recent messages from a Matrix room, including encrypted rooms. The client attempts decryption and may recover previously cached plaintext. Individual messages without available keys are marked unable to decrypt; do not assume all encrypted rooms are unreadable.",
   {
     roomId: z.string().describe("The room ID, e.g. !abc123:matrix.wetec-server.com"),
     limit: z.number().optional().default(30).describe("How many recent messages to fetch (default 30)"),
@@ -39,7 +39,7 @@ server.tool(
 // Tool: search across all readable rooms
 server.tool(
   "search_messages",
-  "Search for a keyword or phrase across all unencrypted Matrix rooms you are in",
+  "Search messages currently loaded in joined Matrix rooms, including decrypted messages from encrypted rooms. This is not a complete search of older server history; undecryptable messages are skipped and reported.",
   {
     query: z.string().describe("Keyword or phrase to search for"),
   },
