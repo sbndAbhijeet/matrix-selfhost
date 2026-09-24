@@ -150,12 +150,20 @@ async function run() {
       membership: m.membership
     }));
 
-    // Scrollback to fetch older history (e.g. 500 messages)
+    // Fetch history until the server says there are no earlier events.
     console.log("Fetching message timeline history...");
-    try {
-      await client.scrollback(room, 500);
-    } catch (err) {
-      console.warn(`Failed to scrollback for room ${room.name}:`, err.message);
+    while (room.oldState.paginationToken !== null) {
+      const previousToken = room.oldState.paginationToken;
+      const previousCount = room.getLiveTimeline().getEvents().length;
+      try {
+        await client.scrollback(room, 100);
+      } catch (err) {
+        throw new Error(`Could not fetch complete history for room ${room.roomId}: ${err.message}`, { cause: err });
+      }
+      if (room.oldState.paginationToken === previousToken &&
+          room.getLiveTimeline().getEvents().length === previousCount) {
+        throw new Error(`History pagination made no progress for room ${room.roomId}`);
+      }
     }
 
     const events = room.getLiveTimeline().getEvents();

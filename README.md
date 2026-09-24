@@ -405,6 +405,7 @@ The `migration/` package provides a utility to export account history (rooms, me
 ### Architectural Features
 * **SSSS Key Recovery**: Decrypts Secure Shared Secret Storage (SSSS) on `matrix.org` using your Recovery Key (`Esta...`), extracts the Megolm backup key, and decrypts historical E2EE rooms.
 * **Persistent Sessions**: Reuses access tokens and device IDs to prevent spamming your account with unverified sessions.
+* **Complete Scrollback**: Fetches room history until the server reports no earlier events. Export stops with an error if it cannot finish fetching a room; large rooms may take longer and use more memory.
 * **Appservice Provisioning**: Uses Synapse Application Service authentication to register users and force-join them into rooms.
 * **PostgreSQL Password Sync**: If accounts already exist, the script runs direct `docker exec` database modifications inside Postgres and Synapse to sync credentials safely.
 * **Timestamp Massaging**: Appends original event timestamps (`?ts=`) on messages so room history is backdated correctly.
