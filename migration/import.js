@@ -28,6 +28,7 @@ if (fileArgIdx === -1 || !args[fileArgIdx + 1]) {
 }
 
 const importFilePath = path.resolve(args[fileArgIdx + 1]);
+const allowPlaintextHistory = args.includes("--allow-plaintext-history");
 
 function mapUserId(publicUserId) {
   if (!publicUserId || !publicUserId.startsWith("@")) return publicUserId;
@@ -71,6 +72,26 @@ async function run() {
   const data = JSON.parse(dataRaw);
 
   const dataDir = path.join(__dirname, "data");
+  const mappingsPath = path.join(dataDir, "room-mappings.json");
+  let roomMappings = {};
+  try {
+    roomMappings = JSON.parse(await fs.readFile(mappingsPath, "utf8"));
+  } catch (err) {
+    if (err.code !== "ENOENT") throw err;
+  }
+
+  const encryptedRooms = data.rooms.filter(room => room.is_encrypted);
+  if (encryptedRooms.length && !allowPlaintextHistory) {
+    throw new Error(`${encryptedRooms.length} encrypted source room(s) contain history that this importer sends as plaintext. To create unencrypted destination rooms and accept this explicitly, pass --allow-plaintext-history.`);
+  }
+  const mappedEncryptedRooms = encryptedRooms.filter(room => roomMappings[room.room_id]);
+  if (mappedEncryptedRooms.length) {
+    throw new Error(`${mappedEncryptedRooms.length} encrypted source room(s) already have destination mappings. Cannot safely replay plaintext into an existing room whose encryption setting is unknown. Inspect the destination rooms and mappings before retrying.`);
+  }
+  if (encryptedRooms.length) {
+    console.warn(`WARNING: ${encryptedRooms.length} encrypted source room(s) will be recreated without encryption. Their imported messages will be stored as plaintext on the destination homeserver.`);
+  }
+
   const credentialsPath = path.join(dataDir, "new-user-credentials.txt");
   await fs.mkdir(dataDir, { recursive: true });
 
@@ -150,15 +171,6 @@ async function run() {
       console.error(`Failed to create account for ${localUserId}:`, err.message);
     }
   }
-  const mappingsPath = path.join(dataDir, "room-mappings.json");
-  let roomMappings = {};
-  try {
-    const mappingsRaw = await fs.readFile(mappingsPath, "utf8");
-    roomMappings = JSON.parse(mappingsRaw);
-  } catch (e) {
-    // Ignore, file doesn't exist yet
-  }
-
   console.log("\nStep 3: Recreating rooms and replaying timelines...");
   const replay = { sent: 0, failed: 0, undecryptable: 0, roomsSkipped: 0 };
   for (const room of data.rooms) {
@@ -196,15 +208,8 @@ async function run() {
           // Encryption does not determine who can join. Keep every migrated room invite-only.
           preset: "private_chat",
           visibility: "private",
-          initial_state: room.is_encrypted ? [
-            {
-              type: "m.room.encryption",
-              state_key: "",
-              content: {
-                algorithm: "m.megolm.v1.aes-sha2"
-              }
-            }
-          ] : []
+          // Replayed events are plaintext. Do not label the destination room encrypted.
+          initial_state: []
         });
         newRoomId = createRes.room_id;
         console.log(`Created room successfully: ${newRoomId}`);
