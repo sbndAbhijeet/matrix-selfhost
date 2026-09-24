@@ -2,6 +2,10 @@ import { getClient, isRoomEncrypted } from "../matrixClient.js";
 import { getCachedMessage } from "../cryptoCache.js";
 
 export async function getMessages({ roomId, limit = 30 }) {
+  if (!Number.isInteger(limit) || limit < 1 || limit > 200) {
+    return { content: [{ type: "text", text: "limit must be an integer from 1 to 200." }] };
+  }
+
   const client = await getClient();
   const room = client.getRoom(roomId);
 
@@ -18,28 +22,42 @@ export async function getMessages({ roomId, limit = 30 }) {
 
   const encrypted = isRoomEncrypted(room);
 
-  // requests a bit more than the user asked for so we have a buffer
-  const fetchLimit = Math.max(limit, 50); // at least 50, or whatever the user asked
-  try {
-    await client.scrollback(room, fetchLimit);
-  } catch (err) {
-    console.error(`[getMessages] scrollback failed for ${roomId}:`, err.message);
-    //continue anyway with whatever is already in the timeline
+  const messageEvents = () => room.getLiveTimeline().getEvents()
+    .filter((e) => e.getType() === "m.room.message");
+
+  let historyProblem = null;
+  // scrollback() fetches at most one page; a page may also contain non-message events.
+  for (let page = 0; messageEvents().length < limit && room.oldState.paginationToken !== null; page++) {
+    if (page === 20) {
+      historyProblem = "Stopped after 20 history pages; older messages may exist.";
+      break;
+    }
+    const beforeCount = room.getLiveTimeline().getEvents().length;
+    const beforeToken = room.oldState.paginationToken;
+    try {
+      await client.scrollback(room, 50);
+    } catch (err) {
+      console.error(`[getMessages] scrollback failed for ${roomId}:`, err.message);
+      historyProblem = `History fetch failed: ${err.message}`;
+      break;
+    }
+    if (room.getLiveTimeline().getEvents().length === beforeCount &&
+        room.oldState.paginationToken === beforeToken) {
+      historyProblem = "History fetch made no progress; older messages may exist.";
+      break;
+    }
   }
 
-  // Now read the timeline (it should contain more messages)
-  const events = room
-    .getLiveTimeline()
-    .getEvents()
-    .filter((e) => e.getType() === "m.room.message")
-    .slice(-limit); // still respect the limit the user requested
+  const events = messageEvents().slice(-limit);
 
   if (events.length === 0) {
     return {
       content: [
         {
           type: "text",
-          text: `No messages found in "${room.name}". The timeline may not be fully synced yet.`,
+          text: historyProblem
+            ? `No messages loaded in "${room.name}". ${historyProblem}`
+            : `No messages found in "${room.name}".`,
         },
       ],
     };
@@ -86,13 +104,15 @@ export async function getMessages({ roomId, limit = 30 }) {
   );
 
   const encNote = encrypted ? " 🔒 (end-to-end encrypted)" : "";
-  const header = `📋 Last ${messages.length} messages from "${room.name}"${encNote}:\n\n`;
+  const header = `📋 ${historyProblem ? "Available" : "Last"} ${messages.length} messages from "${room.name}"${encNote}:\n\n`;
 
   // tells the user if we got fewer messages than requested
   const truncationNote =
-    messages.length < limit
-      ? `\n\nNote: Only ${messages.length} messages were available (requested ${limit}). Older history may exist on the server.`
-      : "";
+    historyProblem
+      ? `\n\n⚠️ Incomplete history: ${historyProblem} Requested ${limit}, loaded ${messages.length}.`
+      : messages.length < limit
+        ? `\n\nNote: Reached the beginning of available room history (${messages.length} messages; requested ${limit}).`
+        : "";
 
   const footer =
     decryptFailures > 0

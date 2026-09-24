@@ -4,7 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "node --test test-tools.js",
+    "test": "node --test test-tools.js test-get-messages.js",
     "start": "node index.js",
     "dev": "node --watch index.js"
   },
