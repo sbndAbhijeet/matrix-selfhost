@@ -91,6 +91,8 @@ matrix-selfhost/
 - **Node.js 18 or higher** inside WSL
 - **Claude Desktop** — installed on Windows
 
+The Docker Compose setup publishes Synapse on `127.0.0.1:8008` for local use. Other machines cannot connect directly to this port; a shared deployment needs a separately configured access path and authentication.
+
 ---
 
 ## 1. Start the homeserver
@@ -414,12 +416,14 @@ The `migration/` package provides a utility to export account history (rooms, me
 Since your Synapse configurations and application service secrets are local (and not committed to Git), you must configure Synapse to recognize the migration appservice:
 
 1. **Create the Registration File**:
-   Create a new file at `synapse/appservice-registration.yaml` with the following content:
+   Generate two different tokens with `openssl rand -hex 32` (run it twice). Create a new file at `synapse/appservice-registration.yaml` with the following content, replacing both placeholders with the generated values. Keep the tokens private; the `as_token` can impersonate users covered by the appservice namespace.
+
+   If you used the previously documented token on a real homeserver, replace it in both the registration and `migration/.env`, then restart Synapse before running the import again.
    ```yaml
    id: migration-appservice
    url: null
-   as_token: "migration_secret_as_token_12345"
-   hs_token: "migration_secret_hs_token_12345"
+   as_token: "REPLACE_WITH_RANDOM_AS_TOKEN"
+   hs_token: "REPLACE_WITH_RANDOM_HS_TOKEN"
    sender_localpart: migration-admin
    rate_limited: false
    namespaces:
@@ -466,7 +470,7 @@ Since your Synapse configurations and application service secrets are local (and
    * `PUBLIC_PASSWORD`: Your password
    * `PUBLIC_RECOVERY_KEY`: Your 48-character Secure Backup Security Key (`Esta ABCD...`)
    * `PRIVATE_HOMESERVER`: `http://localhost:8008` (your local homeserver address)
-   * `APPSERVICE_TOKEN`: The `as_token` configured in `synapse/appservice-registration.yaml` (`migration_secret_as_token_12345`)
+   * `APPSERVICE_TOKEN`: The random `as_token` you configured in `synapse/appservice-registration.yaml`. Do not commit either token.
 
 ### Running the Migration
 
