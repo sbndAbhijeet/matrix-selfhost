@@ -1,4 +1,3 @@
-import sqlite3 from "sqlite3";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -10,7 +9,7 @@ let db = null;
 export function initDatabase() {
   if (db) return Promise.resolve(db);
 
-  return new Promise((resolve, reject) => {
+  return import("sqlite3").then(({ default: sqlite3 }) => new Promise((resolve, reject) => {
     db = new sqlite3.Database(dbPath, (err) => {
       if (err) {
         return reject(err);
@@ -33,7 +32,7 @@ export function initDatabase() {
         resolve(db);
       });
     });
-  });
+  }));
 }
 
 export function saveMessageToCache(event, customRoomId = null) {

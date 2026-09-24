@@ -4,9 +4,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { saveMessageToCache } from "./cryptoCache.js";
-import setGlobalVars from "indexeddbshim";
-
-setGlobalVars(globalThis, { checkOrigin: false });
 
 let client = null;
 let syncReady = false;
