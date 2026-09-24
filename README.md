@@ -482,6 +482,7 @@ node export.js
 ```
 * **First Run (Session Reuse Setup)**: The script will log in with your password and print a `PUBLIC_ACCESS_TOKEN` and `PUBLIC_DEVICE_ID` block. Copy and paste these into your `.env` file. This prevents the script from creating new unverified devices on your account.
 * Once completed, your encrypted history is exported to `migration/data/history-YOUR_USER_ID.json` and attachments are downloaded locally.
+* The exporter reports readable and undecryptable events per room. If key backup restoration fails for encrypted rooms, or any encrypted events remain undecryptable, it exits with an error before writing a new export file. An export file from an earlier run may still be present; check its timestamp before importing.
 
 #### Step 2: Clean up Local Server (Optional)
 If you have previously run imports and want to clear out duplicate room registrations on your local development server, run:

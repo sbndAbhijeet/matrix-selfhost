@@ -96,6 +96,7 @@ async function run() {
   const crypto = client.getCrypto();
 
   console.log("Step 3: Restoring key backup using Recovery Key from Secret Storage...");
+  let backupRestoreError;
   try {
     // Modern Matrix clients store the key backup decryption key inside SSSS
     // (Secure Shared Secret Storage) which is encrypted with your Recovery Key.
@@ -103,8 +104,8 @@ async function run() {
     await crypto.restoreKeyBackup();
     console.log("Megolm keys restored successfully from backup!");
   } catch (err) {
-    console.warn("\n⚠️ WARNING: Key backup decryption failed:", err.message);
-    console.warn("The script will still continue, but older E2EE historical messages may show as undecryptable. Unencrypted rooms and live messages will migrate normally.\n");
+    backupRestoreError = err;
+    console.warn("Key backup restoration failed:", err.message);
   }
 
   console.log("Step 4: Syncing client state...");
@@ -122,6 +123,9 @@ async function run() {
 
   const rooms = client.getRooms();
   console.log(`Found ${rooms.length} rooms.`);
+  if (backupRestoreError && rooms.some(room => room.currentState.getStateEvents("m.room.encryption", ""))) {
+    throw new Error(`Cannot export encrypted rooms without restored keys: ${backupRestoreError.message}`, { cause: backupRestoreError });
+  }
 
   const exportedData = {
     exporter: process.env.PUBLIC_USER_ID,
@@ -131,6 +135,8 @@ async function run() {
 
   const dataDir = path.join(__dirname, "data");
   await fs.mkdir(dataDir, { recursive: true });
+  let totalMessages = 0;
+  let totalUndecryptable = 0;
 
   for (const room of rooms) {
     console.log(`\nProcessing room: ${room.name} (${room.roomId})...`);
@@ -177,15 +183,18 @@ async function run() {
     console.log(`Retrieved ${events.length} timeline events.`);
 
     const messageTimeline = [];
+    let undecryptable = 0;
     for (const e of events) {
-      // We only care about normal room messages
-      if (e.getType() !== "m.room.message") continue;
+      // Failed encrypted events retain m.room.encrypted as their type.
+      if (e.getType() !== "m.room.message" &&
+          !(e.getType() === "m.room.encrypted" && e.isDecryptionFailure())) continue;
 
       let content = e.getContent();
       let decryptionFailed = false;
 
       if (e.isDecryptionFailure()) {
         decryptionFailed = true;
+        undecryptable++;
       }
 
       const eventData = {
@@ -225,6 +234,9 @@ async function run() {
 
       messageTimeline.push(eventData);
     }
+    totalMessages += messageTimeline.length;
+    totalUndecryptable += undecryptable;
+    console.log(`Room ${room.roomId}: ${messageTimeline.length - undecryptable} readable messages, ${undecryptable} undecryptable events.`);
 
     exportedData.rooms.push({
       room_id: room.roomId,
@@ -235,6 +247,11 @@ async function run() {
       members: members,
       timeline: messageTimeline
     });
+  }
+
+  console.log(`Export summary: ${totalMessages - totalUndecryptable} readable messages, ${totalUndecryptable} undecryptable events across ${rooms.length} rooms.`);
+  if (totalUndecryptable) {
+    throw new Error("Encrypted history is incomplete; no export file was written. Restore the missing room keys and retry.");
   }
 
   const safeFilename = `history-${process.env.PUBLIC_USER_ID.replace(/[^a-zA-Z0-9]/g, "_")}.json`;
