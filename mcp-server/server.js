@@ -39,7 +39,7 @@ server.tool(
 // Tool: search across all readable rooms
 server.tool(
   "search_messages",
-  "Search messages currently loaded in joined Matrix rooms, including decrypted messages from encrypted rooms. This is not a complete search of older server history; undecryptable messages are skipped and reported.",
+  "Search server history in joined unencrypted rooms, and loaded decrypted messages in encrypted rooms. Results are bounded and disclose incomplete coverage, including missing encryption keys.",
   {
     query: z.string().describe("Keyword or phrase to search for"),
   },
