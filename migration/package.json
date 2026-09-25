@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "test": "node --test test-replay-journal.js"
+    "test": "node --test test-replay-journal.js test-decrypt-attachment.js"
   },
   "dependencies": {
     "matrix-js-sdk": "^41.8.0",

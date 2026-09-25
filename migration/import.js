@@ -103,6 +103,11 @@ async function run() {
   if (roomsWithoutCreator.length) {
     throw new Error(`${roomsWithoutCreator.length} room(s) have no valid creator in the export. Re-export with the updated exporter before importing; member order cannot identify the original creator.`);
   }
+  const missingAttachments = data.rooms.flatMap(room => room.timeline.filter(msg =>
+    msg.content?.file && !msg.local_attachment_path));
+  if (missingAttachments.length) {
+    throw new Error(`${missingAttachments.length} encrypted attachment(s) have no decrypted local file. Re-export with the updated exporter before importing.`);
+  }
 
   const credentialsPath = path.join(dataDir, "new-user-credentials.txt");
   await fs.mkdir(dataDir, { recursive: true });
@@ -296,6 +301,7 @@ async function run() {
         accessToken: process.env.APPSERVICE_TOKEN,
         queryParams: { user_id: localSender }
       });
+      const content = structuredClone(msg.content);
 
       // Handle attachment uploads
       if (msg.local_attachment_path) {
@@ -310,7 +316,12 @@ async function run() {
             queryParams: { user_id: localSender }
           });
 
-          msg.content.url = uploadRes.content_uri;
+          content.url = uploadRes.content_uri;
+          delete content.file;
+          if (content.info?.thumbnail_file) {
+            delete content.info.thumbnail_file;
+            delete content.info.thumbnail_url;
+          }
         } catch (err) {
           console.warn(`Failed to upload attachment ${msg.content.body}:`, err.message);
           replay.failed++;
@@ -334,7 +345,7 @@ async function run() {
             user_id: localSender,
             ts: msg.origin_server_ts
           },
-          msg.content
+          content
         );
       } catch (err) {
         console.warn(`Failed to replay event ${msg.event_id}:`, err.message);
