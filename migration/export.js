@@ -1,5 +1,6 @@
 import sdk from "matrix-js-sdk";
 import { decodeRecoveryKey } from "matrix-js-sdk/lib/crypto-api/recovery-key.js";
+import { decryptAttachment } from "./decryptAttachment.js";
 import * as dotenv from "dotenv";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -137,6 +138,7 @@ async function run() {
   await fs.mkdir(dataDir, { recursive: true });
   let totalMessages = 0;
   let totalUndecryptable = 0;
+  let attachmentFailures = 0;
 
   for (const room of rooms) {
     console.log(`\nProcessing room: ${room.name} (${room.roomId})...`);
@@ -189,7 +191,7 @@ async function run() {
       if (e.getType() !== "m.room.message" &&
           !(e.getType() === "m.room.encrypted" && e.isDecryptionFailure())) continue;
 
-      let content = e.getContent();
+      const content = structuredClone(e.getContent());
       let decryptionFailed = false;
 
       if (e.isDecryptionFailure()) {
@@ -206,15 +208,17 @@ async function run() {
       };
 
       // Handle attachments (images/files)
-      if (content && content.url && content.url.startsWith("mxc://")) {
-        const httpUrl = client.mxcUrlToHttp(content.url);
+      const mediaUrl = content?.file?.url || content?.url;
+      if (!decryptionFailed && mediaUrl?.startsWith("mxc://")) {
+        const httpUrl = client.mxcUrlToHttp(mediaUrl);
         if (httpUrl) {
           try {
             console.log(`Downloading attachment: ${content.body || "unnamed"}`);
             const response = await fetch(httpUrl);
             if (response.ok) {
               const arrayBuffer = await response.arrayBuffer();
-              const buffer = Buffer.from(arrayBuffer);
+              const ciphertext = Buffer.from(arrayBuffer);
+              const buffer = content.file ? decryptAttachment(ciphertext, content.file) : ciphertext;
               const cleanBody = (content.body || "file").replace(/[^a-zA-Z0-9.]/g, "_");
               const attachmentName = `${e.getId()}_${cleanBody}`;
               const attachmentPath = path.join(dataDir, "attachments", attachmentName);
@@ -223,13 +227,28 @@ async function run() {
               await fs.writeFile(attachmentPath, buffer);
 
               eventData.local_attachment_path = `attachments/${attachmentName}`;
+              if (content.file) {
+                delete content.file;
+                if (content.info?.thumbnail_file) {
+                  delete content.info.thumbnail_file;
+                  delete content.info.thumbnail_url;
+                }
+              }
             } else {
               console.warn(`Failed to download attachment: ${response.statusText}`);
+              attachmentFailures++;
             }
           } catch (err) {
             console.warn(`Failed to download attachment:`, err.message);
+            attachmentFailures++;
           }
+        } else {
+          attachmentFailures++;
+          console.warn(`Could not resolve attachment URL: ${mediaUrl}`);
         }
+      } else if (!decryptionFailed && content?.file) {
+        attachmentFailures++;
+        console.warn(`Encrypted attachment has no valid media URL in event ${e.getId()}`);
       }
 
       messageTimeline.push(eventData);
@@ -249,9 +268,9 @@ async function run() {
     });
   }
 
-  console.log(`Export summary: ${totalMessages - totalUndecryptable} readable messages, ${totalUndecryptable} undecryptable events across ${rooms.length} rooms.`);
-  if (totalUndecryptable) {
-    throw new Error("Encrypted history is incomplete; no export file was written. Restore the missing room keys and retry.");
+  console.log(`Export summary: ${totalMessages - totalUndecryptable} readable messages, ${totalUndecryptable} undecryptable events, ${attachmentFailures} attachment failures across ${rooms.length} rooms.`);
+  if (totalUndecryptable || attachmentFailures) {
+    throw new Error("History or attachments are incomplete; no export file was written. Review the errors and retry.");
   }
 
   const safeFilename = `history-${process.env.PUBLIC_USER_ID.replace(/[^a-zA-Z0-9]/g, "_")}.json`;
